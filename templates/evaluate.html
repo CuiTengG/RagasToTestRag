@@ -1,0 +1,633 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RAG 系统评测 - Ragas</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 1000px;
+        margin: 0 auto;
+      }
+
+      .header {
+        text-align: center;
+        color: white;
+        margin-bottom: 30px;
+      }
+
+      .header h1 {
+        font-size: 2.2rem;
+        margin-bottom: 8px;
+      }
+
+      .header p {
+        font-size: 1rem;
+        opacity: 0.9;
+      }
+
+      .nav-links {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+
+      .nav-links a {
+        color: white;
+        text-decoration: none;
+        padding: 8px 20px;
+        border: 2px solid rgba(255, 255, 255, 0.6);
+        border-radius: 20px;
+        margin: 0 8px;
+        transition: all 0.3s;
+      }
+
+      .nav-links a:hover,
+      .nav-links a.active {
+        background: white;
+        color: #11998e;
+      }
+
+      .card {
+        background: white;
+        border-radius: 12px;
+        padding: 30px;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+        margin-bottom: 20px;
+      }
+
+      .upload-area {
+        border: 3px dashed #11998e;
+        border-radius: 8px;
+        padding: 40px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        background: #f0fff4;
+      }
+
+      .upload-area:hover {
+        border-color: #38ef7d;
+        background: #e8fdf0;
+      }
+
+      .upload-area.dragover {
+        border-color: #38ef7d;
+        background: #d4fce0;
+      }
+
+      .upload-icon {
+        font-size: 48px;
+        margin-bottom: 15px;
+      }
+
+      .upload-text strong {
+        color: #11998e;
+      }
+
+      #file-input {
+        display: none;
+      }
+
+      .selected-file {
+        margin-top: 15px;
+        padding: 12px 15px;
+        background: #e8f5e9;
+        border-radius: 6px;
+        color: #2e7d32;
+        display: none;
+      }
+
+      .format-help {
+        background: #fff8e1;
+        border-left: 4px solid #ffc107;
+        padding: 15px;
+        margin-top: 15px;
+        border-radius: 4px;
+        font-size: 14px;
+      }
+
+      .format-help h4 {
+        margin-bottom: 8px;
+        color: #f57f17;
+      }
+
+      .format-help pre {
+        background: #263238;
+        color: #aed581;
+        padding: 12px;
+        border-radius: 6px;
+        overflow-x: auto;
+        font-size: 12px;
+        margin-top: 8px;
+      }
+
+      .btn {
+        width: 100%;
+        padding: 14px;
+        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 18px;
+        font-weight: 600;
+        cursor: pointer;
+        margin-top: 15px;
+        transition:
+          transform 0.3s ease,
+          box-shadow 0.3s ease;
+      }
+
+      .btn:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(17, 153, 142, 0.4);
+      }
+
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .progress-container {
+        display: none;
+        margin-top: 20px;
+      }
+
+      .progress-bar {
+        height: 8px;
+        background: #e0e0e0;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+
+      .progress-fill {
+        height: 100%;
+        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        width: 0%;
+        transition: width 0.3s ease;
+      }
+
+      .status-text {
+        text-align: center;
+        margin-top: 10px;
+        color: #666;
+      }
+
+      .result-container {
+        display: none;
+      }
+
+      .score-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
+      }
+
+      .score-card {
+        text-align: center;
+        padding: 20px;
+        border-radius: 10px;
+        background: #f5f5f5;
+      }
+
+      .score-card .label {
+        font-size: 13px;
+        color: #888;
+        margin-bottom: 8px;
+      }
+
+      .score-card .value {
+        font-size: 36px;
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+
+      .score-card .level {
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .score-card .desc {
+        font-size: 11px;
+        color: #999;
+        margin-top: 6px;
+      }
+
+      .level-excellent {
+        color: #2e7d32;
+        background: #e8f5e9;
+      }
+      .level-good {
+        color: #f57f17;
+        background: #fff8e1;
+      }
+      .level-fair {
+        color: #e65100;
+        background: #fff3e0;
+      }
+      .level-poor {
+        color: #c62828;
+        background: #ffebee;
+      }
+
+      .overall-card {
+        text-align: center;
+        padding: 30px;
+        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        color: white;
+        border-radius: 12px;
+        margin-bottom: 20px;
+      }
+
+      .overall-card .label {
+        font-size: 14px;
+        opacity: 0.9;
+        margin-bottom: 4px;
+      }
+
+      .overall-card .value {
+        font-size: 48px;
+        font-weight: 800;
+      }
+
+      .overall-card .level {
+        font-size: 18px;
+        font-weight: 600;
+        margin-top: 4px;
+      }
+
+      .detail-section {
+        margin-top: 20px;
+      }
+
+      .detail-section h3 {
+        margin-bottom: 12px;
+        color: #333;
+      }
+
+      .detail-table {
+        width: 100%;
+        border-collapse: collapse;
+        overflow-x: auto;
+        display: block;
+      }
+
+      .detail-table th,
+      .detail-table td {
+        padding: 10px;
+        text-align: left;
+        border-bottom: 1px solid #ddd;
+        max-width: 250px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .detail-table th {
+        background: #f5f5f5;
+        font-weight: 600;
+        color: #333;
+        position: sticky;
+        top: 0;
+      }
+
+      .detail-table tr:hover td {
+        background: #f9f9f9;
+      }
+
+      .download-btn {
+        display: inline-block;
+        padding: 12px 24px;
+        background: #11998e;
+        color: white;
+        text-decoration: none;
+        border-radius: 6px;
+        font-weight: 600;
+        margin-top: 15px;
+        transition: background 0.3s ease;
+      }
+
+      .download-btn:hover {
+        background: #0d7a70;
+      }
+
+      .loading-spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top-color: white;
+        animation: spin 1s linear infinite;
+        margin-right: 8px;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .error-message {
+        background: #ffebee;
+        border-left: 4px solid #f44336;
+        padding: 15px;
+        margin-bottom: 20px;
+        border-radius: 4px;
+        color: #c62828;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>📊 RAG 系统评测</h1>
+        <p>基于 Ragas 框架的四大指标全面评测</p>
+      </div>
+
+      <div class="nav-links">
+        <a href="/">📝 生成测试集</a>
+        <a href="/evaluate" class="active">📊 评测 RAG 系统</a>
+      </div>
+
+      <div class="card">
+        <div class="upload-area" id="upload-area">
+          <div class="upload-icon">📂</div>
+          <div class="upload-text">
+            <strong>点击上传评测数据</strong> 或拖拽文件到此处<br />
+            支持 CSV、JSON、XLSX 格式
+          </div>
+          <input
+            type="file"
+            id="file-input"
+            accept=".csv,.json,.xlsx"
+          />
+        </div>
+
+        <div class="selected-file" id="selected-file">
+          ✅ 已选择文件: <span id="file-name"></span>
+        </div>
+
+        <div class="format-help">
+          <h4>📋 数据格式要求</h4>
+          <p>文件需包含以下列（CSV/XLSX）或字段（JSON）：</p>
+          <table style="width:100%;margin-top:8px;font-size:13px;border-collapse:collapse;">
+            <tr style="background:#f5f5f5;">
+              <th style="padding:6px;text-align:left;">字段</th>
+              <th style="padding:6px;text-align:left;">必需</th>
+              <th style="padding:6px;text-align:left;">说明</th>
+            </tr>
+            <tr>
+              <td style="padding:6px;"><code>question</code></td>
+              <td style="padding:6px;color:#2e7d32;">✅ 必需</td>
+              <td style="padding:6px;">用户提出的问题</td>
+            </tr>
+            <tr style="background:#f9f9f9;">
+              <td style="padding:6px;"><code>answer</code></td>
+              <td style="padding:6px;color:#2e7d32;">✅ 必需</td>
+              <td style="padding:6px;">你的 RAG 系统生成的回答</td>
+            </tr>
+            <tr>
+              <td style="padding:6px;"><code>contexts</code></td>
+              <td style="padding:6px;color:#2e7d32;">✅ 必需</td>
+              <td style="padding:6px;">检索到的上下文（JSON 数组字符串或列表）</td>
+            </tr>
+            <tr style="background:#f9f9f9;">
+              <td style="padding:6px;"><code>ground_truth</code></td>
+              <td style="padding:6px;color:#888;">可选</td>
+              <td style="padding:6px;">标准答案（提升 Context Recall 准确度）</td>
+            </tr>
+          </table>
+
+          <h4 style="margin-top:12px;">CSV 示例：</h4>
+          <pre>question,answer,contexts,ground_truth
+林长的主要职责是什么？,林长的主要职责是组织领导责任区域的森林资源保护和发展工作。,"[""林长的职责包括...""，""各级林长要落实...""]",林长负责森林资源保护和发展
+如何考核林长工作？,考核主要看森林覆盖率和生态保护成效。,"[""考核指标包含...""，""评价标准是...""]",</pre>
+
+          <h4 style="margin-top:12px;">JSON 示例：</h4>
+          <pre>[
+  {
+    "question": "林长的主要职责是什么？",
+    "answer": "林长的主要职责是组织领导责任区域...",
+    "contexts": ["林长的职责包括...", "各级林长要落实..."],
+    "ground_truth": "林长负责森林资源保护和发展"
+  }
+]</pre>
+        </div>
+
+        <button class="btn" id="eval-btn" onclick="runEvaluation()">
+          🔬 开始评测
+        </button>
+
+        <div class="progress-container" id="progress-container">
+          <div class="progress-bar">
+            <div class="progress-fill" id="progress-fill"></div>
+          </div>
+          <div class="status-text" id="status-text">正在评测...</div>
+        </div>
+      </div>
+
+      <div class="result-container" id="result-container">
+        <div id="result-content"></div>
+      </div>
+    </div>
+
+    <script>
+      const uploadArea = document.getElementById("upload-area");
+      const fileInput = document.getElementById("file-input");
+      const selectedFile = document.getElementById("selected-file");
+      const fileName = document.getElementById("file-name");
+
+      uploadArea.addEventListener("click", () => fileInput.click());
+
+      uploadArea.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        uploadArea.classList.add("dragover");
+      });
+
+      uploadArea.addEventListener("dragleave", () => {
+        uploadArea.classList.remove("dragover");
+      });
+
+      uploadArea.addEventListener("drop", (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove("dragover");
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+          fileInput.files = files;
+          handleFileSelect(files[0]);
+        }
+      });
+
+      fileInput.addEventListener("change", (e) => {
+        if (e.target.files.length > 0) {
+          handleFileSelect(e.target.files[0]);
+        }
+      });
+
+      function handleFileSelect(file) {
+        const validExts = [".csv", ".json", ".xlsx"];
+        const fileExt = "." + file.name.split(".").pop().toLowerCase();
+        if (!validExts.includes(fileExt)) {
+          alert("请上传 CSV、JSON 或 XLSX 格式的文件");
+          return;
+        }
+        fileName.textContent = file.name + " (" + formatSize(file.size) + ")";
+        selectedFile.style.display = "block";
+      }
+
+      function formatSize(bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+        return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+      }
+
+      function getLevelClass(level) {
+        if (level === "优秀") return "level-excellent";
+        if (level === "良好") return "level-good";
+        if (level === "一般") return "level-fair";
+        return "level-poor";
+      }
+
+      async function runEvaluation() {
+        const fileInputEl = document.getElementById("file-input");
+        if (!fileInputEl.files || fileInputEl.files.length === 0) {
+          alert("请先选择评测数据文件");
+          return;
+        }
+
+        const btn = document.getElementById("eval-btn");
+        const progressContainer = document.getElementById("progress-container");
+        const progressFill = document.getElementById("progress-fill");
+        const statusText = document.getElementById("status-text");
+        const resultContainer = document.getElementById("result-container");
+        const resultContent = document.getElementById("result-content");
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="loading-spinner"></span>正在评测...';
+        progressContainer.style.display = "block";
+        resultContainer.style.display = "none";
+        progressFill.style.width = "0%";
+
+        try {
+          const formData = new FormData();
+          formData.append("file", fileInputEl.files[0]);
+
+          progressFill.style.width = "40%";
+          statusText.textContent = "正在上传数据...";
+
+          const response = await fetch("/evaluate", {
+            method: "POST",
+            body: formData,
+          });
+
+          progressFill.style.width = "70%";
+          statusText.textContent = "正在计算评测指标（可能需要几分钟）...";
+
+          const result = await response.json();
+
+          if (response.ok && result.success) {
+            progressFill.style.width = "100%";
+            statusText.textContent = "评测完成！";
+
+            let cardsHtml = "";
+            for (const d of result.metric_details) {
+              cardsHtml +=
+                '<div class="score-card ' +
+                getLevelClass(d.level) +
+                '">' +
+                '<div class="label">' +
+                d.name +
+                "</div>" +
+                '<div class="value">' +
+                d.score.toFixed(3) +
+                "</div>" +
+                '<div class="level">' +
+                d.level +
+                "</div>" +
+                '<div class="desc">' +
+                d.description +
+                "</div>" +
+                "</div>";
+            }
+
+            let perSampleHtml = "";
+            if (result.per_sample && result.per_sample.length > 0) {
+              const cols = Object.keys(result.per_sample[0]);
+              perSampleHtml =
+                '<div class="detail-section">' +
+                '<h3>📋 逐条评测明细</h3>' +
+                '<table class="detail-table"><thead><tr>' +
+                cols
+                  .map(function (c) {
+                    return "<th>" + c + "</th>";
+                  })
+                  .join("") +
+                "</tr></thead><tbody>" +
+                result.per_sample
+                  .map(function (row) {
+                    return "<tr>" + cols.map(function (c) {
+                      if (typeof row[c] === "number") {
+                        return "<td>" + row[c].toFixed(4) + "</td>";
+                      }
+                      return "<td>" + (row[c] || "-") + "</td>";
+                    }).join("") + "</tr>";
+                  })
+                  .join("") +
+                "</tbody></table></div>";
+            }
+
+            resultContent.innerHTML =
+              '<div class="overall-card">' +
+              '<div class="label">综合评价得分 · ' +
+              result.sample_count +
+              " 条样本</div>" +
+              '<div class="value">' +
+              result.overall.toFixed(3) +
+              "</div>" +
+              '<div class="level">' +
+              result.overall_level +
+              "</div>" +
+              "</div>" +
+              '<div class="score-cards">' +
+              cardsHtml +
+              "</div>" +
+              perSampleHtml +
+              '<a href="' +
+              result.download_url +
+              '" class="download-btn" download>⬇️ 下载完整评测结果（JSON 格式）</a>';
+
+            resultContainer.style.display = "block";
+          } else {
+            throw new Error(result.error || "评测失败");
+          }
+        } catch (error) {
+          console.error("Error:", error);
+          resultContent.innerHTML =
+            '<div class="error-message">❌ 错误: ' +
+            error.message +
+            "</div>";
+          resultContainer.style.display = "block";
+        } finally {
+          btn.disabled = false;
+          btn.innerHTML = "🔬 开始评测";
+        }
+      }
+    </script>
+  </body>
+</html>

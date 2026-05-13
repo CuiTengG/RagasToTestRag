@@ -88,13 +88,17 @@ def get_llm():
         model_name = os.getenv('OLLAMA_MODEL_NAME', 'gemma2:latest')
         base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
         
+        import httpx
         from langchain_openai import ChatOpenAI
+        
+        http_client = httpx.Client(verify=False, timeout=300.0)
         
         return ChatOpenAI(
             model=model_name,
             openai_api_key="ollama",
             openai_api_base=f"{base_url}/v1",
             temperature=0.7,
+            http_client=http_client,
         )
     
     elif llm_provider == 'openai' or llm_provider == 'deepseek':
@@ -237,6 +241,163 @@ def generate_testset(documents, test_size=10):
 def index():
     return render_template('index.html')
 
+@app.route('/evaluate')
+def evaluate_page():
+    return render_template('evaluate.html')
+
+@app.route('/evaluate', methods=['POST'])
+def evaluate_rag():
+    try:
+        file = request.files.get('file')
+        import pandas as pd
+        
+        if file and file.filename != '':
+            if file.filename.endswith('.csv'):
+                df = pd.read_csv(file)
+            elif file.filename.endswith('.json'):
+                df = pd.read_json(file)
+            elif file.filename.endswith('.xlsx'):
+                df = pd.read_excel(file)
+            else:
+                return jsonify({'error': '请上传 CSV、JSON 或 XLSX 格式的评测数据文件'}), 400
+        else:
+            data = request.get_json()
+            if not data or 'samples' not in data:
+                return jsonify({'error': '请提供评测数据（文件或 JSON）'}), 400
+            df = pd.DataFrame(data['samples'])
+        
+        required_cols = ['question', 'answer', 'contexts']
+        for col in required_cols:
+            if col not in df.columns:
+                return jsonify({'error': f'缺少必需列: {col}'}), 400
+        
+        from ragas import evaluate
+        from ragas.metrics import (
+            context_precision,
+            context_recall,
+            faithfulness,
+            answer_relevancy,
+        )
+        from datasets import Dataset
+        
+        eval_llm = get_llm()
+        eval_embeddings = get_embeddings()
+        
+        records = []
+        for _, row in df.iterrows():
+            record = {
+                'question': str(row['question']),
+                'answer': str(row['answer']),
+            }
+            
+            ctx = row['contexts']
+            if isinstance(ctx, str):
+                try:
+                    ctx = json.loads(ctx)
+                except json.JSONDecodeError:
+                    ctx = [ctx]
+            if not isinstance(ctx, list):
+                ctx = [str(ctx)]
+            record['contexts'] = [str(c) for c in ctx]
+            
+            if 'ground_truth' in df.columns and pd.notna(row['ground_truth']):
+                record['ground_truth'] = str(row['ground_truth'])
+            
+            records.append(record)
+        
+        dataset = Dataset.from_list(records)
+        
+        metrics = [
+            context_precision,
+            context_recall,
+            faithfulness,
+            answer_relevancy,
+        ]
+        
+        print(f"\n{'='*50}")
+        print(f"开始评测 RAG 系统")
+        print(f"评测样本数: {len(records)}")
+        print(f"评测指标: Context Precision, Context Recall, Faithfulness, Answer Relevance")
+        print(f"{'='*50}\n")
+        
+        result = evaluate(
+            dataset=dataset,
+            metrics=metrics,
+            llm=eval_llm,
+            embeddings=eval_embeddings,
+        )
+        
+        result_df = result.to_pandas()
+        
+        scores = {}
+        for col in result_df.columns:
+            if col in ['context_precision', 'context_recall', 'faithfulness', 'answer_relevancy']:
+                scores[col] = round(float(result_df[col].mean()), 4)
+        
+        overall = round(sum(scores.values()) / len(scores), 4) if scores else 0
+        
+        output_filename = f'evaluation_result_{pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")}.json'
+        output_file = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
+        result_df.to_json(output_file, orient='records', force_ascii=False, indent=2)
+        
+        def get_level(score):
+            if score >= 0.8:
+                return '优秀'
+            elif score >= 0.6:
+                return '良好'
+            elif score >= 0.4:
+                return '一般'
+            else:
+                return '较差'
+        
+        metric_details = []
+        name_map = {
+            'context_precision': '上下文精确度',
+            'context_recall': '上下文召回率',
+            'faithfulness': '回答忠实度',
+            'answer_relevancy': '回答相关性',
+        }
+        descriptions = {
+            'context_precision': '检索到的上下文有多少是真正相关的',
+            'context_recall': '相关上下文有多少被成功检索到',
+            'faithfulness': '回答是否基于提供的上下文（不含幻觉）',
+            'answer_relevancy': '回答是否与问题相关',
+        }
+        
+        for key, value in scores.items():
+            metric_details.append({
+                'name': name_map.get(key, key),
+                'key': key,
+                'score': value,
+                'level': get_level(value),
+                'description': descriptions.get(key, ''),
+            })
+        
+        result_data = {
+            'success': True,
+            'scores': scores,
+            'overall': overall,
+            'overall_level': get_level(overall),
+            'metric_details': metric_details,
+            'sample_count': len(records),
+            'per_sample': result_df[['question', 'context_precision', 'context_recall', 'faithfulness', 'answer_relevancy']].to_dict(orient='records'),
+            'download_url': f'/download/{output_filename}',
+        }
+        
+        print(f"\n{'='*50}")
+        print("评测完成!")
+        print(f"综合得分: {overall} ({get_level(overall)})")
+        for key, value in scores.items():
+            print(f"  {name_map.get(key, key)}: {value} ({get_level(value)})")
+        print(f"{'='*50}\n")
+        
+        return jsonify(result_data)
+        
+    except Exception as e:
+        print(f"\n❌ 评测错误: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     files = request.files.getlist('files')
@@ -256,6 +417,7 @@ def upload_file():
         file_names = []
         all_documents = []
         
+        print("步骤 1/3: 加载文档...")
         file_count = 0
         for file in valid_files:
             file_count += 1
@@ -272,7 +434,6 @@ def upload_file():
             all_documents.extend(chunks)
             print(f"✓ {filename}: {len(chunks)} 个块")
         
-        print("步骤 1/3: 加载文档...")
         total_chunks = len(all_documents)
         print(f"\n📊 共加载 {len(valid_files)} 个文件，总计 {total_chunks} 个文档块\n")
         

@@ -41,6 +41,27 @@
         opacity: 0.9;
       }
 
+      .nav-links {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+
+      .nav-links a {
+        color: white;
+        text-decoration: none;
+        padding: 8px 20px;
+        border: 2px solid rgba(255, 255, 255, 0.6);
+        border-radius: 20px;
+        margin: 0 8px;
+        transition: all 0.3s;
+      }
+
+      .nav-links a:hover,
+      .nav-links a.active {
+        background: white;
+        color: #667eea;
+      }
+
       .card {
         background: white;
         border-radius: 12px;
@@ -284,6 +305,11 @@
       <div class="header">
         <h1>📝 Ragas 测试集生成器</h1>
         <p>上传文档，自动生成 RAG 系统评估测试集</p>
+      </div>
+
+      <div class="nav-links">
+        <a href="/" class="active">📝 生成测试集</a>
+        <a href="/evaluate">📊 评测 RAG 系统</a>
       </div>
 
       <div class="card">
