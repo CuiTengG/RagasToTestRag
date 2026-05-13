@@ -13,7 +13,7 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  
 ALLOWED_EXTENSIONS = {'pdf', 'txt', 'docx', 'doc', 'xlsx'}
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -239,47 +239,65 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    if 'file' not in request.files:
+    files = request.files.getlist('files')
+    
+    if not files or all(f.filename == '' for f in files):
         return jsonify({'error': '没有选择文件'}), 400
     
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': '没有选择文件'}), 400
-    
-    if not allowed_file(file.filename):
-        return jsonify({'error': '不支持的文件格式，请上传 PDF、TXT、DOCX、DOC 或 XLSX 文件'}), 400
+    for f in files:
+        if f.filename == '':
+            continue
+        if not allowed_file(f.filename):
+            return jsonify({'error': f'不支持的文件格式: {f.filename}，请上传 PDF、TXT、DOCX、DOC 或 XLSX 文件'}), 400
     
     try:
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-        file.save(filepath)
-        
-        print(f"\n{'='*50}")
-        print(f"开始处理文件: {file.filename}")
-        print(f"{'='*50}\n")
-        
         test_size = int(request.form.get('test_size', 10))
+        valid_files = [f for f in files if f.filename != '']
+        file_names = []
+        all_documents = []
+        
+        file_count = 0
+        for file in valid_files:
+            file_count += 1
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+            file.save(filepath)
+            file_names.append(file.filename)
+            
+            print(f"\n{'='*50}")
+            print(f"加载文件 {file_count}/{len(valid_files)}: {file.filename}")
+            print(f"{'='*50}")
+            
+            chunks = load_document(filepath)
+            all_documents.extend(chunks)
+            print(f"✓ {filename}: {len(chunks)} 个块")
         
         print("步骤 1/3: 加载文档...")
-        documents = load_document(filepath)
-        print(f"✓ 文档已分割为 {len(documents)} 个块")
+        total_chunks = len(all_documents)
+        print(f"\n📊 共加载 {len(valid_files)} 个文件，总计 {total_chunks} 个文档块\n")
         
         print("步骤 2/3: 生成测试集...")
-        testset = generate_testset(documents, test_size)
+        testset = generate_testset(all_documents, test_size)
         test_df = testset.to_pandas()
         print(f"✓ 测试集已生成，包含 {len(test_df)} 条数据")
         
         print("步骤 3/3: 保存结果...")
-        output_file = os.path.join(app.config['UPLOAD_FOLDER'], f'testset_{filename}.json')
+        base_name = secure_filename('_'.join(f.rsplit('.', 1)[0] for f in file_names[:2]))
+        if len(file_names) > 2:
+            base_name = base_name + f'_等{len(file_names)}个文件'
+        output_filename = f'testset_{base_name}.json'
+        output_file = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
         test_df.to_json(output_file, orient='records', force_ascii=False, indent=2)
         print(f"✓ 结果已保存到: {output_file}")
         
         result_data = {
             'success': True,
-            'message': f'成功生成 {len(test_df)} 条测试数据',
-            'filename': f'testset_{filename}.json',
-            'download_url': f'/download/{f"testset_{filename}.json"}',
-            'preview': test_df.head(5).to_dict(orient='records')
+            'message': f'成功处理 {len(valid_files)} 个文件，生成 {len(test_df)} 条测试数据',
+            'filename': output_filename,
+            'download_url': f'/download/{output_filename}',
+            'preview': test_df.head(5).to_dict(orient='records'),
+            'file_list': file_names,
+            'total_chunks': total_chunks,
         }
         
         print(f"\n{'='*50}")

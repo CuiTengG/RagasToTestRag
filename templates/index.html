@@ -90,11 +90,28 @@
 
       .selected-file {
         margin-top: 15px;
-        padding: 10px;
+        padding: 12px 15px;
         background: #e8f5e9;
         border-radius: 6px;
         color: #2e7d32;
         display: none;
+        max-height: 150px;
+        overflow-y: auto;
+      }
+
+      .selected-file .file-list-title {
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+
+      .selected-file .file-item {
+        padding: 3px 0;
+        font-size: 14px;
+        color: #388e3c;
+      }
+
+      .selected-file .file-item::before {
+        content: "📎 ";
       }
 
       .form-group {
@@ -274,12 +291,14 @@
           <div class="upload-icon">📄</div>
           <div class="upload-text">
             <strong>点击选择文件</strong> 或拖拽文件到此处<br />
-            支持 PDF、TXT、DOCX、DOC、XLSX 格式
+            支持 PDF、TXT、DOCX、DOC、XLSX 格式<br />
+            <small style="color: #888">可同时上传多个文件</small>
           </div>
           <input
             type="file"
             id="file-input"
             accept=".pdf,.txt,.docx,.doc,.xlsx"
+            multiple
           />
         </div>
 
@@ -332,27 +351,67 @@
         const files = e.dataTransfer.files;
         if (files.length > 0) {
           fileInput.files = files;
-          handleFileSelect(files[0]);
+          handleFileSelect(files);
         }
       });
 
       fileInput.addEventListener("change", (e) => {
         if (e.target.files.length > 0) {
-          handleFileSelect(e.target.files[0]);
+          handleFileSelect(e.target.files);
         }
       });
 
-      function handleFileSelect(file) {
+      function handleFileSelect(files) {
         const validTypes = [".pdf", ".txt", ".docx", ".doc", ".xlsx"];
-        const fileExt = "." + file.name.split(".").pop().toLowerCase();
+        const validFiles = [];
+        const invalidFiles = [];
 
-        if (!validTypes.includes(fileExt)) {
-          alert("请上传 PDF、TXT、DOCX、DOC 或 XLSX 格式的文件");
+        for (const file of files) {
+          const fileExt = "." + file.name.split(".").pop().toLowerCase();
+          if (validTypes.includes(fileExt)) {
+            validFiles.push(file);
+          } else {
+            invalidFiles.push(file.name);
+          }
+        }
+
+        if (invalidFiles.length > 0) {
+          alert(
+            "以下文件格式不支持:\n" +
+              invalidFiles.join("\n") +
+              "\n\n支持: PDF、TXT、DOCX、DOC、XLSX",
+          );
+        }
+
+        if (validFiles.length === 0) {
+          selectedFile.style.display = "none";
           return;
         }
 
-        fileName.textContent = file.name;
+        const dt = new DataTransfer();
+        validFiles.forEach((f) => dt.items.add(f));
+        fileInput.files = dt.files;
+
+        let html =
+          '<div class="file-list-title">✅ 已选择 ' +
+          validFiles.length +
+          " 个文件:</div>";
+        for (const f of validFiles) {
+          html +=
+            '<div class="file-item">' +
+            f.name +
+            " (" +
+            formatSize(f.size) +
+            ")</div>";
+        }
+        selectedFile.innerHTML = html;
         selectedFile.style.display = "block";
+      }
+
+      function formatSize(bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+        return (bytes / (1024 * 1024)).toFixed(1) + " MB";
       }
 
       async function generateTestset() {
@@ -376,14 +435,17 @@
 
         try {
           const formData = new FormData();
-          formData.append("file", fileInput.files[0]);
+          for (const file of fileInput.files) {
+            formData.append("files", file);
+          }
           formData.append(
             "test_size",
             document.getElementById("test-size").value,
           );
 
+          const fileCount = fileInput.files.length;
           progressFill.style.width = "30%";
-          statusText.textContent = "正在上传文件...";
+          statusText.textContent = "正在上传 " + fileCount + " 个文件...";
 
           const response = await fetch("/upload", {
             method: "POST",
@@ -423,11 +485,22 @@
                         `;
             }
 
+            let fileInfoHtml = "";
+            if (result.file_list) {
+              fileInfoHtml =
+                '<div style="margin-top:10px;font-size:13px;color:#666;">📁 来源文件: ' +
+                result.file_list.join(", ") +
+                "<br>📊 文档块数: " +
+                result.total_chunks +
+                "</div>";
+            }
+
             resultContent.innerHTML = `
                         <div class="success-message">
                             ✅ ${result.message}
                         </div>
                         ${previewHtml}
+                        ${fileInfoHtml}
                         <a href="${result.download_url}" class="download-btn" download>
                             ⬇️ 下载完整测试集（JSON格式）
                         </a>
