@@ -15,19 +15,31 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 # Flask 应用配置
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'              # 上传文件存储目录
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 文件大小上限: 50MB
+app.config['MAX_CONTENT_LENGTH'] = 4096 * 1024 * 1024  # 文件大小上限: 4GB
 ALLOWED_EXTENSIONS = {'pdf', 'txt', 'docx', 'doc', 'xlsx'}  # 支持的文件格式
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# 文件格式校验
+_cached_embeddings = None
+
 def allowed_file(filename):
+    """
+    校验文件格式是否在允许的范围内
+    params:
+        filename: 文件名
+    return:
+        bool: 是否允许上传
+    """
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# 文档加载与分割
-# 根据文件扩展名选择对应的 Loader，加载后统一使用
-# RecursiveCharacterTextSplitter 分割为适合 RAG 的文档块
 def load_document(file_path):
+    """
+    加载文档并返回文档块列表
+    params:
+        file_path: 文档文件路径
+    return:
+        list: 文档块列表
+    """
     if '.' not in file_path:
         raise ValueError("文件名缺少扩展名")
     
@@ -63,7 +75,13 @@ def load_document(file_path):
     return chunks
 
 def load_doc_file(file_path):
-    """处理旧版 .doc 格式文件（兼容性备选方案）"""
+    """
+    处理旧版 .doc 格式文件（兼容性备选方案）
+    params:
+        file_path: 文档文件路径
+    return:
+        list: 文档块列表
+    """
     from langchain_core.documents import Document
     
     try:
@@ -90,9 +108,17 @@ def load_doc_file(file_path):
     chunks = text_splitter.split_documents(documents)
     return chunks
 
-# LLM 工厂函数，根据 LLM_PROVIDER 环境变量动态选择 LLM 提供商:
 def get_llm():
     llm_provider = os.getenv('LLM_PROVIDER', 'ollama').lower()
+    """
+    根据环境变量动态选择 LLM 提供商
+    params:
+        None
+    return:
+        ChatOpenAI: 选择的 LLM 模型
+    """
+    if not llm_provider:
+        raise Exception("未配置 LLM_PROVIDER 环境变量")
     
     print(f"使用 LLM 提供商: {llm_provider}")
     
@@ -109,7 +135,7 @@ def get_llm():
             model=model_name,
             openai_api_key="ollama",           # Ollama 不校验，任意值即可
             openai_api_base=f"{base_url}/v1",  # Ollama 的 OpenAI 兼容端点
-            temperature=0.8,                   # 评测/生成测试集时使用确定性输出
+            temperature=0,                     # 评测/生成测试集时使用确定性输出，防止随机性
             max_retries=2,
             http_client=http_client,
         )
@@ -132,8 +158,14 @@ def get_llm():
     else:
         raise Exception(f"不支持的 LLM 提供商: {llm_provider}")
 
-# 计算设备检测，自动检测 GPU (CUDA) 可用性，用于 Embedding 模型加速
 def get_device():
+    """
+    根据环境变量自动选择设备（GPU 或 CPU）
+    params:
+        None
+    return:
+        str: 选择的设备（'cuda' 或 'cpu'）
+    """
     device = os.getenv('DEVICE', 'auto').lower()
     
     if device == 'auto':
@@ -153,8 +185,19 @@ def get_device():
     
     return device
 
-# Embedding 工厂函数，根据 EMBEDDING_PROVIDER 环境变量动态选择 Embedding 模型:
 def get_embeddings():
+    """
+    根据环境变量动态选择 Embedding 模型
+    params:
+        None
+    return:
+        HuggingFaceEmbeddings: 选择的 Embedding 模型
+    """
+    global _cached_embeddings
+
+    if _cached_embeddings is not None:
+        return _cached_embeddings
+    
     embedding_provider = os.getenv('EMBEDDING_PROVIDER', 'huggingface').lower()
     
     print(f"使用 Embedding 提供商: {embedding_provider}")
@@ -166,12 +209,21 @@ def get_embeddings():
         
         try:
             # 首选: 使用 LangChain 封装的 HuggingFaceEmbeddings
-            from langchain_community.embeddings import HuggingFaceEmbeddings
-            return HuggingFaceEmbeddings(
+            from langchain_huggingface import HuggingFaceEmbeddings
+
+            _cached_embeddings = HuggingFaceEmbeddings(
                 model_name=model_name,
-                model_kwargs={'device': device},                        # GPU/CPU 设备
-                encode_kwargs={'normalize_embeddings': True, 'batch_size': 16},
+                model_kwargs={
+                    'device': device, # GPU/CPU 设备
+                    'trust_remote_code': True,
+                    }, 
+                encode_kwargs={
+                    'normalize_embeddings': True, 
+                    'batch_size': 16
+                    },
             )
+
+            return _cached_embeddings
         except ImportError:
             # 备选: 直接使用 sentence-transformers 封装为 LangChain Embeddings 接口
             from sentence_transformers import SentenceTransformer
@@ -206,10 +258,15 @@ def get_embeddings():
     else:
         raise Exception(f"不支持的 Embedding 提供商: {embedding_provider}")
 
-# 测试集生成
-# 使用 Ragas TestsetGenerator 基于上传的文档自动生成 RAG 评估测试集
-# 流程: 文档 → LLM 生成问答 → 过滤验证 → 输出测试集
 def generate_testset(documents, test_size=10):
+    """
+    生成 RAG 评估测试集
+    params:
+        documents: 文档块列表
+        test_size: 测试集大小（默认 10 个问题）
+    return:
+        None
+    """
     try:
         from ragas.testset import TestsetGenerator
         from ragas.testset.evolutions import simple, multi_context
@@ -281,14 +338,23 @@ def generate_testset(documents, test_size=10):
 
 @app.route('/')
 def index():
+    """ 首页 """
     return render_template('index.html')
 
 @app.route('/evaluate')
 def evaluate_page():
+    """ 评估页面 """
     return render_template('evaluate.html')
 
 @app.route('/evaluate', methods=['POST'])
 def evaluate_rag():
+    """ 
+    评估 RAG 模型 
+    params:
+        None
+    return:
+        None
+    """
     try:
         file = request.files.get('file')
         import pandas as pd
@@ -352,8 +418,8 @@ def evaluate_rag():
         metrics = [
             context_precision,
             context_recall,
-            # faithfulness,
-            # answer_relevancy,
+            faithfulness,
+            answer_relevancy,
         ]
         
         print(f"\n{'='*50}")
@@ -423,8 +489,8 @@ def evaluate_rag():
             'overall_level': get_level(overall),
             'metric_details': metric_details,
             'sample_count': len(records),
-            # 'per_sample': result_df[['question', 'context_precision', 'context_recall', 'faithfulness', 'answer_relevancy']].to_dict(orient='records'),
-            'per_sample': result_df[['question', 'context_precision', 'context_recall']].to_dict(orient='records'),
+            'per_sample': result_df[['question', 'context_precision', 'context_recall', 'faithfulness', 'answer_relevancy']].to_dict(orient='records'),
+            # 'per_sample': result_df[['question', 'context_precision', 'context_recall']].to_dict(orient='records'),
             'download_url': f'/download/{output_filename}',
         }
         
@@ -444,7 +510,13 @@ def evaluate_rag():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """上传文档并生成测试集 (POST)：支持多文件同时上传，合并所有文档生成一份测试集。返回: JSON 格式的测试集预览 + 下载链接"""
+    """
+    上传文档并生成测试集 (POST)：支持多文件同时上传，合并所有文档生成一份测试集。返回: JSON 格式的测试集预览 + 下载链接
+    params:
+        None
+    return:
+        None
+    """
     files = request.files.getlist('files')  # 获取所有上传文件列表
     
     if not files or all(f.filename == '' for f in files):
@@ -521,10 +593,15 @@ def upload_file():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-# 路由: 文件下载
-# 提供生成的测试集 / 评测结果 JSON 文件下载
 @app.route('/download/<filename>')
 def download_file(filename):
+    """
+    下载文件 (GET)：根据文件名返回指定文件
+    params:
+        filename: 要下载的文件名
+    return:
+        文件内容
+    """
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     if os.path.exists(filepath):
         return send_file(filepath, as_attachment=True)
