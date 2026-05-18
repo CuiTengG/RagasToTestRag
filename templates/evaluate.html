@@ -448,22 +448,27 @@
     </div>
 
     <script>
+      // 文件上传交互逻辑
       const uploadArea = document.getElementById("upload-area");
       const fileInput = document.getElementById("file-input");
       const selectedFile = document.getElementById("selected-file");
       const fileName = document.getElementById("file-name");
 
+      // 点击上传区域触发文件选择器
       uploadArea.addEventListener("click", () => fileInput.click());
 
+      // 拖拽上传 - 拖入时高亮
       uploadArea.addEventListener("dragover", (e) => {
         e.preventDefault();
         uploadArea.classList.add("dragover");
       });
 
+      // 拖拽上传 - 离开时取消高亮
       uploadArea.addEventListener("dragleave", () => {
         uploadArea.classList.remove("dragover");
       });
 
+      // 拖拽上传 - 放下文件时处理
       uploadArea.addEventListener("drop", (e) => {
         e.preventDefault();
         uploadArea.classList.remove("dragover");
@@ -480,6 +485,7 @@
         }
       });
 
+      // 验证文件格式并显示文件名和大小
       function handleFileSelect(file) {
         const validExts = [".csv", ".json", ".xlsx"];
         const fileExt = "." + file.name.split(".").pop().toLowerCase();
@@ -491,12 +497,14 @@
         selectedFile.style.display = "block";
       }
 
+      // 格式化文件大小显示（B / KB / MB）
       function formatSize(bytes) {
         if (bytes < 1024) return bytes + " B";
         if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
         return (bytes / (1024 * 1024)).toFixed(1) + " MB";
       }
 
+      // 根据评分等级返回对应 CSS 类名
       function getLevelClass(level) {
         if (level === "优秀") return "level-excellent";
         if (level === "良好") return "level-good";
@@ -504,6 +512,7 @@
         return "level-poor";
       }
 
+      // RAG 系统评测主流程
       async function runEvaluation() {
         const fileInputEl = document.getElementById("file-input");
         if (!fileInputEl.files || fileInputEl.files.length === 0) {
@@ -518,6 +527,7 @@
         const resultContainer = document.getElementById("result-container");
         const resultContent = document.getElementById("result-content");
 
+        // 禁用按钮，显示加载状态
         btn.disabled = true;
         btn.innerHTML = '<span class="loading-spinner"></span>正在评测...';
         progressContainer.style.display = "block";
@@ -531,6 +541,7 @@
           progressFill.style.width = "40%";
           statusText.textContent = "正在上传数据...";
 
+          // 发送评测请求到后端 /evaluate 接口
           const response = await fetch("/evaluate", {
             method: "POST",
             body: formData,
@@ -545,27 +556,21 @@
             progressFill.style.width = "100%";
             statusText.textContent = "评测完成！";
 
+            // 构建四个评测指标的卡片 HTML
             let cardsHtml = "";
             for (const d of result.metric_details) {
               cardsHtml +=
                 '<div class="score-card ' +
                 getLevelClass(d.level) +
                 '">' +
-                '<div class="label">' +
-                d.name +
-                "</div>" +
-                '<div class="value">' +
-                d.score.toFixed(3) +
-                "</div>" +
-                '<div class="level">' +
-                d.level +
-                "</div>" +
-                '<div class="desc">' +
-                d.description +
-                "</div>" +
+                '<div class="label">' + d.name + "</div>" +
+                '<div class="value">' + d.score.toFixed(3) + "</div>" +
+                '<div class="level">' + d.level + "</div>" +
+                '<div class="desc">' + d.description + "</div>" +
                 "</div>";
             }
 
+            // 构建逐条评测明细表格
             let perSampleHtml = "";
             if (result.per_sample && result.per_sample.length > 0) {
               const cols = Object.keys(result.per_sample[0]);
@@ -574,14 +579,13 @@
                 '<h3>📋 逐条评测明细</h3>' +
                 '<table class="detail-table"><thead><tr>' +
                 cols
-                  .map(function (c) {
-                    return "<th>" + c + "</th>";
-                  })
+                  .map(function (c) { return "<th>" + c + "</th>"; })
                   .join("") +
                 "</tr></thead><tbody>" +
                 result.per_sample
                   .map(function (row) {
                     return "<tr>" + cols.map(function (c) {
+                      // 数字类型格式化到 4 位小数
                       if (typeof row[c] === "number") {
                         return "<td>" + row[c].toFixed(4) + "</td>";
                       }
@@ -592,25 +596,16 @@
                 "</tbody></table></div>";
             }
 
+            // 渲染完整评测结果页面: 综合卡片 + 指标卡片 + 明细表格 + 下载按钮
             resultContent.innerHTML =
               '<div class="overall-card">' +
-              '<div class="label">综合评价得分 · ' +
-              result.sample_count +
-              " 条样本</div>" +
-              '<div class="value">' +
-              result.overall.toFixed(3) +
+              '<div class="label">综合评价得分 · ' + result.sample_count + " 条样本</div>" +
+              '<div class="value">' + result.overall.toFixed(3) + "</div>" +
+              '<div class="level">' + result.overall_level + "</div>" +
               "</div>" +
-              '<div class="level">' +
-              result.overall_level +
-              "</div>" +
-              "</div>" +
-              '<div class="score-cards">' +
-              cardsHtml +
-              "</div>" +
+              '<div class="score-cards">' + cardsHtml + "</div>" +
               perSampleHtml +
-              '<a href="' +
-              result.download_url +
-              '" class="download-btn" download>⬇️ 下载完整评测结果（JSON 格式）</a>';
+              '<a href="' + result.download_url + '" class="download-btn" download>⬇️ 下载完整评测结果（JSON 格式）</a>';
 
             resultContainer.style.display = "block";
           } else {
@@ -619,11 +614,10 @@
         } catch (error) {
           console.error("Error:", error);
           resultContent.innerHTML =
-            '<div class="error-message">❌ 错误: ' +
-            error.message +
-            "</div>";
+            '<div class="error-message">❌ 错误: ' + error.message + "</div>";
           resultContainer.style.display = "block";
         } finally {
+          // 恢复按钮状态
           btn.disabled = false;
           btn.innerHTML = "🔬 开始评测";
         }

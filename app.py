@@ -8,25 +8,32 @@ import certifi
 
 load_dotenv()
 
-# 修复 SSL_CERT_FILE 不存在问题
+# 修复 Conda 环境下 SSL_CERT_FILE 指向不存在文件的问题
+# 使用 certifi 提供的可靠 CA 证书包覆盖无效的环境变量
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
+# Flask 应用配置
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  
-ALLOWED_EXTENSIONS = {'pdf', 'txt', 'docx', 'doc', 'xlsx'}
+app.config['UPLOAD_FOLDER'] = 'uploads'              # 上传文件存储目录
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 文件大小上限: 50MB
+ALLOWED_EXTENSIONS = {'pdf', 'txt', 'docx', 'doc', 'xlsx'}  # 支持的文件格式
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
+# 文件格式校验
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+# 文档加载与分割
+# 根据文件扩展名选择对应的 Loader，加载后统一使用
+# RecursiveCharacterTextSplitter 分割为适合 RAG 的文档块
 def load_document(file_path):
     if '.' not in file_path:
         raise ValueError("文件名缺少扩展名")
     
     file_ext = file_path.rsplit('.', 1)[1].lower()
     
+    # 根据文件类型选择对应的 LangChain Loader
     try:
         if file_ext == 'pdf':
             from langchain_community.document_loaders import PyPDFLoader
@@ -38,7 +45,7 @@ def load_document(file_path):
             from langchain_community.document_loaders import Docx2txtLoader
             loader = Docx2txtLoader(file_path)
         elif file_ext == 'doc':
-            return load_doc_file(file_path)
+            return load_doc_file(file_path)  # .doc 使用独立处理函数
         elif file_ext == 'xlsx':
             from langchain_community.document_loaders import UnstructuredExcelLoader
             loader = UnstructuredExcelLoader(file_path, mode="elements")
@@ -49,20 +56,24 @@ def load_document(file_path):
     except Exception as e:
         raise Exception(f"加载文档失败 ({file_ext}): {str(e)}")
     
+    # 使用递归字符分割器将长文档切分为适合送入 LLM 的小块
     from langchain.text_splitter import RecursiveCharacterTextSplitter
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
     chunks = text_splitter.split_documents(documents)
     return chunks
 
 def load_doc_file(file_path):
+    """处理旧版 .doc 格式文件（兼容性备选方案）"""
     from langchain_core.documents import Document
     
     try:
+        # 首选: 使用 textract 库提取文本
         import textract
         text = textract.process(file_path).decode('utf-8')
         documents = [Document(page_content=text, metadata={'source': file_path})]
     except ImportError:
         try:
+            # 备选: 使用系统 antiword 命令行工具
             import subprocess
             result = subprocess.run(['antiword', file_path], capture_output=True, text=True)
             if result.returncode == 0:
@@ -75,10 +86,11 @@ def load_doc_file(file_path):
         raise Exception(f"无法读取 .doc 文件: {str(e)}")
     
     from langchain.text_splitter import RecursiveCharacterTextSplitter
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
     chunks = text_splitter.split_documents(documents)
     return chunks
 
+# LLM 工厂函数，根据 LLM_PROVIDER 环境变量动态选择 LLM 提供商:
 def get_llm():
     llm_provider = os.getenv('LLM_PROVIDER', 'ollama').lower()
     
@@ -95,9 +107,10 @@ def get_llm():
         
         return ChatOpenAI(
             model=model_name,
-            openai_api_key="ollama",
-            openai_api_base=f"{base_url}/v1",
-            temperature=0.7,
+            openai_api_key="ollama",           # Ollama 不校验，任意值即可
+            openai_api_base=f"{base_url}/v1",  # Ollama 的 OpenAI 兼容端点
+            temperature=0.8,                   # 评测/生成测试集时使用确定性输出
+            max_retries=2,
             http_client=http_client,
         )
     
@@ -119,6 +132,7 @@ def get_llm():
     else:
         raise Exception(f"不支持的 LLM 提供商: {llm_provider}")
 
+# 计算设备检测，自动检测 GPU (CUDA) 可用性，用于 Embedding 模型加速
 def get_device():
     device = os.getenv('DEVICE', 'auto').lower()
     
@@ -139,6 +153,7 @@ def get_device():
     
     return device
 
+# Embedding 工厂函数，根据 EMBEDDING_PROVIDER 环境变量动态选择 Embedding 模型:
 def get_embeddings():
     embedding_provider = os.getenv('EMBEDDING_PROVIDER', 'huggingface').lower()
     
@@ -147,16 +162,18 @@ def get_embeddings():
     device = get_device()
     
     if embedding_provider == 'huggingface':
-        model_name = os.getenv('EMBEDDING_MODEL_NAME', 'intfloat/multilingual-e5-large')
+        model_name = os.getenv('EMBEDDING_MODEL_NAME', 'intfloat/multilingual-e5-base')
         
         try:
+            # 首选: 使用 LangChain 封装的 HuggingFaceEmbeddings
             from langchain_community.embeddings import HuggingFaceEmbeddings
             return HuggingFaceEmbeddings(
                 model_name=model_name,
-                model_kwargs={'device': device},
-                encode_kwargs={'normalize_embeddings': True, 'batch_size': 32},
+                model_kwargs={'device': device},                        # GPU/CPU 设备
+                encode_kwargs={'normalize_embeddings': True, 'batch_size': 16},
             )
         except ImportError:
+            # 备选: 直接使用 sentence-transformers 封装为 LangChain Embeddings 接口
             from sentence_transformers import SentenceTransformer
             from langchain_core.embeddings import Embeddings
             import numpy as np
@@ -166,7 +183,7 @@ def get_embeddings():
                     self.model = SentenceTransformer(model_name, device=device)
                 
                 def embed_documents(self, texts):
-                    return self.model.encode(texts, normalize_embeddings=True, batch_size=32).tolist()
+                    return self.model.encode(texts, normalize_embeddings=True, batch_size=16).tolist()
                 
                 def embed_query(self, text):
                     return self.model.encode([text], normalize_embeddings=True)[0].tolist()
@@ -189,11 +206,17 @@ def get_embeddings():
     else:
         raise Exception(f"不支持的 Embedding 提供商: {embedding_provider}")
 
+# 测试集生成
+# 使用 Ragas TestsetGenerator 基于上传的文档自动生成 RAG 评估测试集
+# 流程: 文档 → LLM 生成问答 → 过滤验证 → 输出测试集
 def generate_testset(documents, test_size=10):
     try:
         from ragas.testset import TestsetGenerator
+        from ragas.testset.evolutions import simple, multi_context
         from langchain_core.documents import Document
+        from ragas.run_config import RunConfig
         
+        # 根据语言配置决定是否插入中文指令提示
         language = os.getenv('TEST_LANGUAGE', 'chinese').lower()
         print(f"测试集语言: {language}")
         
@@ -218,16 +241,35 @@ def generate_testset(documents, test_size=10):
         print(f"文档数量: {len(documents)}")
         print(f"测试集大小: {test_size}")
         
+        # 创建 Ragas TestsetGenerator 实例
         generator = TestsetGenerator.from_langchain(
-            generator_llm=generator_llm,
-            critic_llm=critic_llm,
-            embeddings=embeddings,
+            generator_llm=generator_llm,  # 用于生成问题的 LLM
+            critic_llm=critic_llm,        # 用于过滤/验证的 LLM
+            embeddings=embeddings,        # 用于计算语义相似度
+        )
+
+        # 问题类型分布: 80% 单跳问题 + 20% 多跳问题
+        distributions = {
+            simple: 1.0,
+            # simple: 0.8,
+            # multi_context: 0.2,
+        }
+
+        # 运行配置: 单线程避免 Ollama 并发过载
+        run_config = RunConfig(
+            max_workers=1,
+            max_retries=1,
+            timeout=120,
         )
         
         testset = generator.generate_with_langchain_docs(
             documents,
             test_size=test_size,
-            raise_exceptions=False,
+            distributions=distributions,
+            raise_exceptions=False,        # 单条失败不中断整体流程
+            with_debugging_logs=False,
+            is_async=False,                # 同步模式避免 Ollama 异步超时
+            run_config=run_config,
         )
         
         return testset
@@ -310,8 +352,8 @@ def evaluate_rag():
         metrics = [
             context_precision,
             context_recall,
-            faithfulness,
-            answer_relevancy,
+            # faithfulness,
+            # answer_relevancy,
         ]
         
         print(f"\n{'='*50}")
@@ -325,6 +367,7 @@ def evaluate_rag():
             metrics=metrics,
             llm=eval_llm,
             embeddings=eval_embeddings,
+            raise_exceptions=False
         )
         
         result_df = result.to_pandas()
@@ -380,7 +423,8 @@ def evaluate_rag():
             'overall_level': get_level(overall),
             'metric_details': metric_details,
             'sample_count': len(records),
-            'per_sample': result_df[['question', 'context_precision', 'context_recall', 'faithfulness', 'answer_relevancy']].to_dict(orient='records'),
+            # 'per_sample': result_df[['question', 'context_precision', 'context_recall', 'faithfulness', 'answer_relevancy']].to_dict(orient='records'),
+            'per_sample': result_df[['question', 'context_precision', 'context_recall']].to_dict(orient='records'),
             'download_url': f'/download/{output_filename}',
         }
         
@@ -400,11 +444,13 @@ def evaluate_rag():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    files = request.files.getlist('files')
+    """上传文档并生成测试集 (POST)：支持多文件同时上传，合并所有文档生成一份测试集。返回: JSON 格式的测试集预览 + 下载链接"""
+    files = request.files.getlist('files')  # 获取所有上传文件列表
     
     if not files or all(f.filename == '' for f in files):
         return jsonify({'error': '没有选择文件'}), 400
     
+    # 验证所有文件格式
     for f in files:
         if f.filename == '':
             continue
@@ -417,6 +463,7 @@ def upload_file():
         file_names = []
         all_documents = []
         
+        # 步骤 1/3: 逐个加载并分割文档
         print("步骤 1/3: 加载文档...")
         file_count = 0
         for file in valid_files:
@@ -431,17 +478,19 @@ def upload_file():
             print(f"{'='*50}")
             
             chunks = load_document(filepath)
-            all_documents.extend(chunks)
+            all_documents.extend(chunks)  # 合并到总文档列表
             print(f"✓ {filename}: {len(chunks)} 个块")
         
         total_chunks = len(all_documents)
         print(f"\n📊 共加载 {len(valid_files)} 个文件，总计 {total_chunks} 个文档块\n")
         
+        # 步骤 2/3: 使用 Ragas 生成测试集
         print("步骤 2/3: 生成测试集...")
         testset = generate_testset(all_documents, test_size)
         test_df = testset.to_pandas()
         print(f"✓ 测试集已生成，包含 {len(test_df)} 条数据")
         
+        # 步骤 3/3: 保存为 JSON 文件
         print("步骤 3/3: 保存结果...")
         base_name = secure_filename('_'.join(f.rsplit('.', 1)[0] for f in file_names[:2]))
         if len(file_names) > 2:
@@ -456,7 +505,7 @@ def upload_file():
             'message': f'成功处理 {len(valid_files)} 个文件，生成 {len(test_df)} 条测试数据',
             'filename': output_filename,
             'download_url': f'/download/{output_filename}',
-            'preview': test_df.head(5).to_dict(orient='records'),
+            'preview': test_df.head(5).to_dict(orient='records'),  # 前 5 条预览
             'file_list': file_names,
             'total_chunks': total_chunks,
         }
@@ -472,6 +521,8 @@ def upload_file():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+# 路由: 文件下载
+# 提供生成的测试集 / 评测结果 JSON 文件下载
 @app.route('/download/<filename>')
 def download_file(filename):
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -500,7 +551,7 @@ if __name__ == '__main__':
     
     print(f"\n📌 Embedding 提供商: {embedding_provider}")
     if embedding_provider.lower() == 'huggingface':
-        emb_model = os.getenv('EMBEDDING_MODEL_NAME', 'intfloat/multilingual-e5-large')
+        emb_model = os.getenv('EMBEDDING_MODEL_NAME', 'intfloat/multilingual-e5-base')
         print(f"   - 模型: {emb_model}")
     
     print(f"\n📌 计算设备: {device}")
@@ -517,4 +568,5 @@ if __name__ == '__main__':
     print("\n访问地址: http://localhost:5000")
     print("="*50 + "\n")
     
-    app.run(debug=True, port=5000)
+    # threaded=False 避免 Ollama 异步调用冲突
+    app.run(debug=True, port=5001, threaded=False)

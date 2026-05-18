@@ -355,22 +355,27 @@
     </div>
 
     <script>
+      // 多文件上传交互逻辑
       const uploadArea = document.getElementById("upload-area");
       const fileInput = document.getElementById("file-input");
       const selectedFile = document.getElementById("selected-file");
       const fileName = document.getElementById("file-name");
 
+      // 点击上传区域触发文件选择器
       uploadArea.addEventListener("click", () => fileInput.click());
 
+      // 拖拽上传 - 拖入时高亮
       uploadArea.addEventListener("dragover", (e) => {
         e.preventDefault();
         uploadArea.classList.add("dragover");
       });
 
+      // 拖拽上传 - 离开时取消高亮
       uploadArea.addEventListener("dragleave", () => {
         uploadArea.classList.remove("dragover");
       });
 
+      // 拖拽上传 - 放下文件时处理
       uploadArea.addEventListener("drop", (e) => {
         e.preventDefault();
         uploadArea.classList.remove("dragover");
@@ -387,6 +392,7 @@
         }
       });
 
+      // 验证所有文件格式，过滤无效文件，显示文件列表
       function handleFileSelect(files) {
         const validTypes = [".pdf", ".txt", ".docx", ".doc", ".xlsx"];
         const validFiles = [];
@@ -414,6 +420,7 @@
           return;
         }
 
+        // 用 DataTransfer 重新构建 fileList（仅包含有效文件）
         const dt = new DataTransfer();
         validFiles.forEach((f) => dt.items.add(f));
         fileInput.files = dt.files;
@@ -434,12 +441,14 @@
         selectedFile.style.display = "block";
       }
 
+      // 格式化文件大小显示（B / KB / MB）
       function formatSize(bytes) {
         if (bytes < 1024) return bytes + " B";
         if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
         return (bytes / (1024 * 1024)).toFixed(1) + " MB";
       }
 
+      // 测试集生成主流程
       async function generateTestset() {
         if (!fileInput.files || fileInput.files.length === 0) {
           alert("请先选择要上传的文件");
@@ -453,6 +462,7 @@
         const resultContainer = document.getElementById("result-container");
         const resultContent = document.getElementById("result-content");
 
+        // 禁用按钮，显示加载状态
         btn.disabled = true;
         btn.innerHTML = '<span class="loading-spinner"></span>正在生成...';
         progressContainer.style.display = "block";
@@ -461,6 +471,7 @@
 
         try {
           const formData = new FormData();
+          // 添加所有文件到表单（支持多文件）
           for (const file of fileInput.files) {
             formData.append("files", file);
           }
@@ -473,6 +484,7 @@
           progressFill.style.width = "30%";
           statusText.textContent = "正在上传 " + fileCount + " 个文件...";
 
+          // 发送请求到后端 /upload 接口
           const response = await fetch("/upload", {
             method: "POST",
             body: formData,
@@ -487,6 +499,7 @@
             progressFill.style.width = "100%";
             statusText.textContent = "完成！";
 
+            // 构建数据预览表格（前 5 条）
             let previewHtml = "";
             if (result.preview && result.preview.length > 0) {
               const keys = Object.keys(result.preview[0]);
@@ -511,6 +524,7 @@
                         `;
             }
 
+            // 构建来源文件信息
             let fileInfoHtml = "";
             if (result.file_list) {
               fileInfoHtml =
@@ -545,6 +559,7 @@
                 `;
           resultContainer.style.display = "block";
         } finally {
+          // 恢复按钮状态
           btn.disabled = false;
           btn.innerHTML = "🚀 生成测试集";
         }
