@@ -16,7 +16,7 @@
 - 📁 **批量上传**：可同时上传多个文档，合并生成一份测试集
 - 🤖 **灵活 LLM 选择**：Ollama 本地运行（免费）/ DeepSeek / OpenAI
 - 🌐 **高质量 Embedding**：HuggingFace multilingual-e5-large（中英文通用）
-- 🇨🇳 **原生中文支持**：自动生成中文问答对
+- 🇨🇳 **原生中文支持**：自动生成中文问答对（需配合中文模型如 Qwen2.5）
 - ⚡ **GPU 加速**：CUDA 加速（速度提升 3-15 倍）
 - 🎨 **现代化 Web UI**：拖拽上传，实时进度，结果预览与下载
 
@@ -47,8 +47,24 @@
 ```bash
 # 安装 Ollama: https://ollama.com
 ollama serve                    # 启动 Ollama 服务
-ollama pull gemma2:latest       # 拉取 LLM 模型
+
+# 拉取 LLM 模型（根据你的语言需求选择）
+ollama pull gemma2:latest       # 英文测试集（默认）
+ollama pull qwen2.5:7b          # 中文测试集（推荐）
 ```
+
+> ⚠️ **重要：模型语言能力说明**
+>
+> 不同 LLM 模型生成的问题语言不同，`TEST_LANGUAGE=chinese` 只是向模型发送中文指令，**实际输出语言取决于模型本身的能力**：
+>
+> | 模型 | 生成问题语言 | 推荐场景 |
+> |------|------------|----------|
+> | **gemma2:latest** | 🇬🇧 仅英文 | 英文文档 / 英文测试集 |
+> | **qwen2.5:7b** | 🇨🇳 中文 | 中文文档 / 中文测试集（推荐）|
+> | **qwen2.5:14b** | 🇨🇳 中文 | 更高质量中文（需更多显存）|
+> | **deepseek-chat** | 🇨🇳+🇬🇧 中英皆可 | API 方式，质量最佳 |
+>
+> 如需生成**中文问答对**，请使用 `qwen2.5` 系列或 `deepseek`，不要使用 `gemma2`。
 
 ### 步骤 2: 克隆项目并安装依赖
 
@@ -77,18 +93,18 @@ cp .env.example .env
 ```bash
 # ===== LLM 配置 =====
 LLM_PROVIDER=ollama                              # ollama / deepseek / openai
-OLLAMA_MODEL_NAME=gemma2:latest                  # Ollama 模型名称
+OLLAMA_MODEL_NAME=qwen2.5:7b                     # 中文用 qwen2.5，英文用 gemma2
 OLLAMA_BASE_URL=http://localhost:11434           # Ollama 地址
 
 # ===== Embedding 配置 =====
 EMBEDDING_PROVIDER=huggingface                   # huggingface / openai
-EMBEDDING_MODEL_NAME=intfloat/multilingual-e5-large  # 多语言嵌入模型
+EMBEDDING_MODEL_NAME=intfloat/multilingual-e5-base  # 多语言嵌入模型（base 版本更轻量）
 
 # ===== 计算设备 =====
 DEVICE=auto                                      # auto / cuda / cpu
 
 # ===== 测试集语言 =====
-TEST_LANGUAGE=chinese                            # chinese / english
+TEST_LANGUAGE=chinese                            # chinese / english（需配合对应语言能力的模型）
 
 # ===== API 密钥（使用 DeepSeek/OpenAI 时必填）=====
 OPENAI_API_KEY=your_api_key_here
@@ -230,11 +246,14 @@ RagasToTestRag/
 
 ### LLM 提供商对比
 
-| 提供商 | 成本 | 延迟 | 适用场景 | 环境变量 |
-|--------|:--:|:--:|----------|----------|
-| **Ollama** | 🆓 免费 | ~30s/条 | 本地开发/隐私敏感 | `LLM_PROVIDER=ollama` |
-| **DeepSeek** | 💰 低 | ~2s/条 | 生产环境/中文优化 | `LLM_PROVIDER=deepseek` |
-| **OpenAI** | 💰💰 高 | ~1s/条 | 高质量英文场景 | `LLM_PROVIDER=openai` |
+| 提供商 | 成本 | 延迟 | 语言支持 | 适用场景 | 环境变量 |
+|--------|:--:|:--:|:------:|----------|----------|
+| **Ollama (Qwen2.5)** | 🆓 免费 | ~30s/条 | 🇨🇳 中文 | 中文文档 / 本地开发 | `OLLAMA_MODEL_NAME=qwen2.5:7b` |
+| **Ollama (Gemma2)** | 🆓 免费 | ~30s/条 | 🇬🇧 英文 | 英文文档 / 本地开发 | `OLLAMA_MODEL_NAME=gemma2:latest` |
+| **DeepSeek** | 💰 低 | ~2s/条 | 🇨🇳🇬🇧 中英 | 生产环境 / 中文优化 | `LLM_PROVIDER=deepseek` |
+| **OpenAI** | 💰💰 高 | ~1s/条 | 🇬🇧 英文为主 | 高质量英文场景 | `LLM_PROVIDER=openai` |
+
+> 💡 **中文场景推荐**: Ollama + Qwen2.5（免费）或 DeepSeek API（高质量）
 
 ### Embedding 方案对比
 
@@ -333,6 +352,29 @@ pip install certifi
 </details>
 
 <details>
+<summary><b>❓ 设置了 TEST_LANGUAGE=chinese 但生成的测试集仍是英文？</b></summary>
+
+这是**正常现象**。`TEST_LANGUAGE=chinese` 只是向 LLM 发送"请用中文生成"的指令，但**最终输出语言取决于模型本身的能力**：
+
+- **Gemma2** → 模型训练数据以英文为主，即使收到中文指令也倾向于生成英文
+- **Qwen2.5** → 模型原生支持中文，能正确生成中文问答对
+- **DeepSeek** → 中英文均支持良好
+
+**解决方案**：切换到中文模型：
+```bash
+# 拉取中文模型
+ollama pull qwen2.5:7b
+
+# 修改 .env
+OLLAMA_MODEL_NAME=qwen2.5:7b
+TEST_LANGUAGE=chinese
+
+# 重启应用
+python app.py
+```
+</details>
+
+<details>
 <summary><b>❓ 如何切换到 DeepSeek API？</b></summary>
 
 修改 `.env` 文件:
@@ -349,7 +391,10 @@ OPENAI_MODEL_NAME=deepseek-chat
 
 1. **启用 GPU**: 确保 PyTorch 是 GPU 版本（CUDA 12.4），设置 `DEVICE=cuda`
 2. **减少数量**: 将测试集大小从 10 减少到 5
-3. **换用更快模型**: Ollama 中尝试 `qwen2:7b` 或 `llama3.2:3b`（更小但更快）
+3. **换用更小模型**: 
+   - 英文: `gemma2:2b`（2B 参数，速度快）
+   - 中文: `qwen2.5:3b` 或 `qwen2.5:1.5b`（中文支持 + 体积小）
+4. **切换到 API**: 使用 DeepSeek/API 方式比本地 Ollama 更快
 </details>
 
 <details>
