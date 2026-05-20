@@ -308,7 +308,6 @@ def generate_testset(documents, test_size=10):
         # 问题类型分布: 80% 单跳问题 + 20% 多跳问题
         distributions = {
             simple: 1.0,
-            # simple: 0.8,
             # multi_context: 0.2,
         }
 
@@ -490,7 +489,6 @@ def evaluate_rag():
             'metric_details': metric_details,
             'sample_count': len(records),
             'per_sample': result_df[['question', 'context_precision', 'context_recall', 'faithfulness', 'answer_relevancy']].to_dict(orient='records'),
-            # 'per_sample': result_df[['question', 'context_precision', 'context_recall']].to_dict(orient='records'),
             'download_url': f'/download/{output_filename}',
         }
         
