@@ -640,7 +640,7 @@ if __name__ == '__main__':
         except ImportError:
             print("   ⚠️ PyTorch 未安装，使用 CPU")
     
-    print("\n访问地址: http://localhost:5000")
+    print("\n访问地址: http://localhost:5001")
     print("="*50 + "\n")
     
     # threaded=False 避免 Ollama 异步调用冲突
